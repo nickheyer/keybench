@@ -78,11 +78,17 @@ func (w *AsyncWebRunner) RunWithProgressContext(ctx context.Context) ([]AsyncWeb
 	processedCombos := make(map[string]bool)
 
 	// Create a timeout context that also respects the parent context
-	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(w.config.Timeout)*time.Second)
-	defer cancel()
+	var timeoutCtx context.Context
+	var cancel context.CancelFunc
+	if w.config.Timeout > 0 {
+		timeoutCtx, cancel = context.WithTimeout(ctx, time.Duration(w.config.Timeout)*time.Second)
+		defer cancel()
+	} else {
+		timeoutCtx = context.Background()
+	}
 
-	fmt.Printf("AsyncWebRunner: Starting with config - Algorithms: %v, KeySizes: %v, Iterations: %d, Parallel: %d\n",
-		w.config.Algorithms, w.config.KeySizes, w.config.Iterations, w.config.Parallel)
+	fmt.Printf("AsyncWebRunner: Starting with config - Algorithms: %v, KeySizes: %v, Iterations: %d, Parallel: %d, Workers: %d\n",
+		w.config.Algorithms, w.config.KeySizes, w.config.Iterations, w.config.Parallel, w.config.Workers)
 
 	for _, algo := range w.config.Algorithms {
 		bench, err := getAlgorithmBenchmark(algo)
@@ -148,8 +154,14 @@ func (w *AsyncWebRunner) runAsyncBenchmarkWithContext(ctx context.Context, bench
 	totalIterations := w.config.Iterations * w.config.Parallel
 
 	// Create a timeout context that also respects the parent context
-	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(w.config.Timeout)*time.Second)
-	defer cancel()
+	var timeoutCtx context.Context
+	var cancel context.CancelFunc
+	if w.config.Timeout > 0 {
+		timeoutCtx, cancel = context.WithTimeout(ctx, time.Duration(w.config.Timeout)*time.Second)
+		defer cancel()
+	} else {
+		timeoutCtx = context.Background()
+	}
 
 	// Tracking variables
 	var (
@@ -302,12 +314,12 @@ func (w *AsyncWebRunner) runAsyncBenchmarkWithContext(ctx context.Context, bench
 	for int(atomic.LoadInt32(&completed)) < totalIterations {
 		time.Sleep(10 * time.Millisecond)
 	}
-	
+
 	// Stop progress updates
 	close(stopProgress)
 	// Give the progress goroutine time to exit cleanly
 	time.Sleep(50 * time.Millisecond)
-	
+
 	// Now safe to close the progress channel
 	close(result.Progress)
 

@@ -29,7 +29,7 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "keybench",
-	Short: "A comprehensive cryptographic key generation benchmark tool",
+	Short: "Benchmark cryptographic key generation",
 	Long: `KeyBench is a production-ready system benchmarking tool that uses
 cryptographic key generation to stress test CPU performance.
 

@@ -16,10 +16,10 @@ import (
 )
 
 type WebRunner struct {
-	config        Config
-	keyStore      *storage.KeyStore
-	fileStorage   *storage.FileStorage
-	progressChan  chan ProgressUpdate
+	config       Config
+	keyStore     *storage.KeyStore
+	fileStorage  *storage.FileStorage
+	progressChan chan ProgressUpdate
 }
 
 type WebResult struct {
@@ -55,7 +55,7 @@ func (w *WebRunner) RunWithProgress() ([]WebResult, error) {
 	var results []WebResult
 	processedCombos := make(map[string]bool)
 
-	fmt.Printf("WebRunner: Starting with config - Algorithms: %v, KeySizes: %v, Iterations: %d, Parallel: %d\n", 
+	fmt.Printf("WebRunner: Starting with config - Algorithms: %v, KeySizes: %v, Iterations: %d, Parallel: %d\n",
 		w.config.Algorithms, w.config.KeySizes, w.config.Iterations, w.config.Parallel)
 
 	for _, algo := range w.config.Algorithms {
@@ -86,7 +86,7 @@ func (w *WebRunner) RunWithProgress() ([]WebResult, error) {
 				return nil, err
 			}
 
-			fmt.Printf("WebRunner: Benchmark completed - Keys generated: %d, Errors: %d\n", 
+			fmt.Printf("WebRunner: Benchmark completed - Keys generated: %d, Errors: %d\n",
 				len(result.KeyIDs), result.Errors)
 			results = append(results, result)
 		}
@@ -115,8 +115,14 @@ func (w *WebRunner) runSingleBenchmarkWithKeys(bench AlgorithmBenchmark, keySize
 	totalIterations := w.config.Iterations * w.config.Parallel
 
 	// Run benchmark
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(w.config.Timeout)*time.Second)
-	defer cancel()
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if w.config.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(w.config.Timeout)*time.Second)
+		defer cancel()
+	} else {
+		ctx = context.Background()
+	}
 
 	var timings []time.Duration
 	var errors int
@@ -175,12 +181,12 @@ func (w *WebRunner) runSingleBenchmarkWithKeys(bench AlgorithmBenchmark, keySize
 						Algorithm:  bench.Name(),
 						KeySize:    keySize,
 					}
-					
+
 					select {
 					case result.Progress <- update:
 					default:
 					}
-					
+
 					if w.progressChan != nil {
 						select {
 						case w.progressChan <- update:
@@ -195,10 +201,10 @@ func (w *WebRunner) runSingleBenchmarkWithKeys(bench AlgorithmBenchmark, keySize
 	}
 
 	wg.Wait()
-	
+
 	// Wait for all keys to be stored
 	keyStoreWg.Wait()
-	
+
 	close(result.Progress)
 
 	result.TotalTime = time.Since(startTime)
@@ -222,34 +228,34 @@ func (w *WebRunner) storeKey(algorithm string, keySize int, keyData any, benchma
 	if !useFileStorage && algorithm == "RSA" && keySize >= 8192 {
 		useFileStorage = true // Automatically use file storage for large RSA keys
 	}
-	
-	fmt.Printf("WebRunner.storeKey: algorithm=%s, keySize=%d, useFileStorage=%v, fileStorage=%v\n", 
+
+	fmt.Printf("WebRunner.storeKey: algorithm=%s, keySize=%d, useFileStorage=%v, fileStorage=%v\n",
 		algorithm, keySize, useFileStorage, w.fileStorage != nil)
-	
+
 	if useFileStorage && w.fileStorage != nil {
 		// Store key to file and return reference
 		keyID := uuid.New().String()
-		
+
 		// Validate algorithm
 		_, err := getAlgorithmBenchmark(algorithm)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		// Create streaming writer for private key
 		writer, err := w.fileStorage.CreateStreamingWriter(keyID, "private")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create file writer: %w", err)
 		}
-		
+
 		// Use the existing key data to write to file
 		err = w.writeKeyToFile(algorithm, keyData, writer)
 		writer.Close()
-		
+
 		if err != nil {
 			return nil, fmt.Errorf("failed to write key to file: %w", err)
 		}
-		
+
 		// Create a reference in the key store
 		storedKey := &storage.StoredKey{
 			ID:          keyID,
@@ -261,13 +267,13 @@ func (w *WebRunner) storeKey(algorithm string, keySize int, keyData any, benchma
 			PrivateKey:  "[Stored in file]",
 			PublicKey:   "[Stored in file]",
 		}
-		
+
 		// Store the reference in the key store
 		w.keyStore.StoreKeyReference(storedKey)
-		
+
 		return storedKey, nil
 	}
-	
+
 	// Regular in-memory storage
 	switch algorithm {
 	case "RSA":

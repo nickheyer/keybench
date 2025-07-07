@@ -25,7 +25,7 @@
                     <label>Algorithms:</label>
                     <div class="checkbox-group">
                         <label><input type="checkbox" name="algorithms" value="rsa" checked> RSA</label>
-                        <label><input type="checkbox" name="algorithms" value="rsa-parallel"> RSA (Multi-core) <small>Best for ≥8192 bits</small></label>
+                        <label><input type="checkbox" name="algorithms" value="rsa-parallel"> RSA (Multi-core)</label>
                         <label><input type="checkbox" name="algorithms" value="ecdsa"> ECDSA</label>
                         <label><input type="checkbox" name="algorithms" value="ed25519"> Ed25519</label>
                     </div>
@@ -59,13 +59,13 @@
 
                 <div class="form-group">
                     <label for="workers">Worker Threads:</label>
-                    <input type="number" id="workers" name="workers" value="1" min="1" max="32">
+                    <input type="number" id="workers" name="workers" value="1" min="1">
                     <small>Number of background worker threads in the pool (default: 1)</small>
                 </div>
 
                 <div class="form-group">
                     <label for="timeout">Timeout (seconds):</label>
-                    <input type="number" id="timeout" name="timeout" value="300" min="10" max="3600">
+                    <input type="number" id="timeout" name="timeout" value="300" min="-1">
                 </div>
 
                 <button type="submit" class="btn btn-primary">Start Benchmark</button>
