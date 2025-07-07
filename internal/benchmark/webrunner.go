@@ -5,6 +5,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"sync"
 	"time"
@@ -16,6 +18,7 @@ import (
 type WebRunner struct {
 	config        Config
 	keyStore      *storage.KeyStore
+	fileStorage   *storage.FileStorage
 	progressChan  chan ProgressUpdate
 }
 
@@ -35,10 +38,11 @@ type ProgressUpdate struct {
 	KeySize    int     `json:"key_size"`
 }
 
-func NewWebRunner(config Config, keyStore *storage.KeyStore) *WebRunner {
+func NewWebRunner(config Config, keyStore *storage.KeyStore, fileStorage *storage.FileStorage) *WebRunner {
 	return &WebRunner{
 		config:       config,
 		keyStore:     keyStore,
+		fileStorage:  fileStorage,
 		progressChan: make(chan ProgressUpdate, 100),
 	}
 }
@@ -213,6 +217,58 @@ func (w *WebRunner) runSingleBenchmarkWithKeys(bench AlgorithmBenchmark, keySize
 }
 
 func (w *WebRunner) storeKey(algorithm string, keySize int, keyData any, benchmarkID string) (*storage.StoredKey, error) {
+	// Check if we should use file storage based on key size or config
+	useFileStorage := w.config.FileStorage
+	if !useFileStorage && algorithm == "RSA" && keySize >= 8192 {
+		useFileStorage = true // Automatically use file storage for large RSA keys
+	}
+	
+	fmt.Printf("WebRunner.storeKey: algorithm=%s, keySize=%d, useFileStorage=%v, fileStorage=%v\n", 
+		algorithm, keySize, useFileStorage, w.fileStorage != nil)
+	
+	if useFileStorage && w.fileStorage != nil {
+		// Store key to file and return reference
+		keyID := uuid.New().String()
+		
+		// Validate algorithm
+		_, err := getAlgorithmBenchmark(algorithm)
+		if err != nil {
+			return nil, err
+		}
+		
+		// Create streaming writer for private key
+		writer, err := w.fileStorage.CreateStreamingWriter(keyID, "private")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create file writer: %w", err)
+		}
+		
+		// Use the existing key data to write to file
+		err = w.writeKeyToFile(algorithm, keyData, writer)
+		writer.Close()
+		
+		if err != nil {
+			return nil, fmt.Errorf("failed to write key to file: %w", err)
+		}
+		
+		// Create a reference in the key store
+		storedKey := &storage.StoredKey{
+			ID:          keyID,
+			Type:        algorithm,
+			Size:        keySize,
+			BenchmarkID: benchmarkID,
+			CreatedAt:   time.Now(),
+			FileStored:  true,
+			PrivateKey:  "[Stored in file]",
+			PublicKey:   "[Stored in file]",
+		}
+		
+		// Store the reference in the key store
+		w.keyStore.StoreKeyReference(storedKey)
+		
+		return storedKey, nil
+	}
+	
+	// Regular in-memory storage
 	switch algorithm {
 	case "RSA":
 		if key, ok := keyData.(*rsa.PrivateKey); ok {
@@ -236,4 +292,97 @@ func (w *WebRunner) storeKey(algorithm string, keySize int, keyData any, benchma
 	default:
 		return nil, fmt.Errorf("unsupported algorithm: %s", algorithm)
 	}
+}
+
+func (w *WebRunner) writeKeyToFile(algorithm string, keyData any, writer *storage.StreamingKeyWriter) error {
+	switch algorithm {
+	case "RSA":
+		if key, ok := keyData.(*rsa.PrivateKey); ok {
+			// Encode private key
+			privKeyPEM := &pem.Block{
+				Type:  "RSA PRIVATE KEY",
+				Bytes: x509.MarshalPKCS1PrivateKey(key),
+			}
+			if err := pem.Encode(writer, privKeyPEM); err != nil {
+				return err
+			}
+			// Write separator
+			if _, err := writer.Write([]byte("\n")); err != nil {
+				return err
+			}
+			// Encode public key
+			pubKeyBytes, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+			if err != nil {
+				return err
+			}
+			pubKeyPEM := &pem.Block{
+				Type:  "PUBLIC KEY",
+				Bytes: pubKeyBytes,
+			}
+			return pem.Encode(writer, pubKeyPEM)
+		}
+	case "ECDSA":
+		if key, ok := keyData.(*ecdsa.PrivateKey); ok {
+			// Encode private key
+			privKeyBytes, err := x509.MarshalECPrivateKey(key)
+			if err != nil {
+				return err
+			}
+			privKeyPEM := &pem.Block{
+				Type:  "EC PRIVATE KEY",
+				Bytes: privKeyBytes,
+			}
+			if err := pem.Encode(writer, privKeyPEM); err != nil {
+				return err
+			}
+			// Write separator
+			if _, err := writer.Write([]byte("\n")); err != nil {
+				return err
+			}
+			// Encode public key
+			pubKeyBytes, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+			if err != nil {
+				return err
+			}
+			pubKeyPEM := &pem.Block{
+				Type:  "PUBLIC KEY",
+				Bytes: pubKeyBytes,
+			}
+			return pem.Encode(writer, pubKeyPEM)
+		}
+	case "Ed25519":
+		if keys, ok := keyData.([]any); ok && len(keys) == 2 {
+			if pub, pubOk := keys[0].(ed25519.PublicKey); pubOk {
+				if priv, privOk := keys[1].(ed25519.PrivateKey); privOk {
+					// Encode private key
+					privKeyBytes, err := x509.MarshalPKCS8PrivateKey(priv)
+					if err != nil {
+						return err
+					}
+					privKeyPEM := &pem.Block{
+						Type:  "PRIVATE KEY",
+						Bytes: privKeyBytes,
+					}
+					if err := pem.Encode(writer, privKeyPEM); err != nil {
+						return err
+					}
+					// Write separator
+					if _, err := writer.Write([]byte("\n")); err != nil {
+						return err
+					}
+					// Encode public key
+					pubKeyBytes, err := x509.MarshalPKIXPublicKey(pub)
+					if err != nil {
+						return err
+					}
+					pubKeyPEM := &pem.Block{
+						Type:  "PUBLIC KEY",
+						Bytes: pubKeyBytes,
+					}
+					return pem.Encode(writer, pubKeyPEM)
+				}
+			}
+		}
+	}
+	return fmt.Errorf("invalid key data for %s", algorithm)
 }

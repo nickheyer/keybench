@@ -79,7 +79,9 @@ async function startBenchmark(event) {
         key_sizes: keySizes,
         iterations: parseInt(formData.get('iterations')),
         parallel: parseInt(formData.get('parallel')),
+        workers: parseInt(formData.get('workers')) || 1,
         timeout: parseInt(formData.get('timeout')),
+        file_storage: document.getElementById('fileStorage').checked,
         show_progress: true,
         verbose: true
     };
@@ -108,19 +110,26 @@ async function startBenchmark(event) {
     }
 }
 
+let currentJobId = null;
+let currentWebSocket = null;
+
 async function monitorBenchmark(jobId) {
+    currentJobId = jobId;
     const progressBar = document.getElementById('progressBar');
     const progressInfo = document.getElementById('progressInfo');
     
     // Connect via WebSocket for real-time progress updates
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${protocol}//${window.location.host}${API_BASE}/benchmarks/${jobId}/progress`);
+    currentWebSocket = ws;
     
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         
         if (data.completed) {
             ws.close();
+            currentWebSocket = null;
+            currentJobId = null;
             progressBar.style.width = '100%';
             progressBar.textContent = '100%';
             
@@ -137,6 +146,10 @@ async function monitorBenchmark(jobId) {
             } else if (data.status === 'failed') {
                 progressInfo.textContent = 'Benchmark failed!';
                 progressInfo.style.color = 'var(--danger-color)';
+            } else if (data.status === 'terminated') {
+                progressInfo.textContent = 'Benchmark terminated by user';
+                progressInfo.style.color = 'var(--warning-color)';
+                document.getElementById('benchmarkProgress').style.display = 'none';
             }
         } else if (data.percentage !== undefined) {
             // Update progress bar and info
@@ -318,24 +331,27 @@ async function deleteKey(keyId) {
 }
 
 async function clearAllKeys() {
-    if (!confirm('Are you sure you want to delete ALL keys? This action cannot be undone.')) {
+    if (!confirm('Are you sure you want to delete ALL keys and their files? This action cannot be undone.')) {
         return;
     }
     
     try {
-        const response = await fetch(`${API_BASE}/keys`);
-        const keys = await response.json();
+        // Use the new cleanup endpoint that deletes both keys and files
+        const response = await fetch(`${API_BASE}/keys/cleanup-all`, {
+            method: 'POST'
+        });
         
-        for (const key of keys) {
-            await fetch(`${API_BASE}/keys/${key.id}`, {
-                method: 'DELETE'
-            });
+        if (response.ok) {
+            const result = await response.json();
+            alert(result.message);
+        } else {
+            throw new Error('Failed to cleanup keys');
         }
         
         refreshKeys();
     } catch (error) {
         console.error('Failed to clear keys:', error);
-        alert('Failed to clear keys');
+        alert('Failed to clear all keys and files');
     }
 }
 
@@ -401,5 +417,30 @@ function formatDuration(nanoseconds) {
         return `${(nanoseconds / 1000000).toFixed(2)}ms`;
     } else {
         return `${(nanoseconds / 1000000000).toFixed(2)}s`;
+    }
+}
+
+async function terminateBenchmark() {
+    if (!currentJobId) {
+        return;
+    }
+    
+    if (confirm('Are you sure you want to terminate this benchmark? Any keys being generated will be deleted.')) {
+        try {
+            const response = await fetch(`${API_BASE}/benchmarks/${currentJobId}/terminate`, {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                if (currentWebSocket) {
+                    currentWebSocket.close();
+                    currentWebSocket = null;
+                }
+                currentJobId = null;
+            }
+        } catch (error) {
+            console.error('Failed to terminate benchmark:', error);
+            alert('Failed to terminate benchmark: ' + error.message);
+        }
     }
 }

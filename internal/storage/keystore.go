@@ -23,12 +23,14 @@ const (
 
 type StoredKey struct {
 	ID          string    `json:"id"`
-	Type        KeyType   `json:"type"`
+	Type        string    `json:"type"`
 	Size        int       `json:"size"`
 	CreatedAt   time.Time `json:"created_at"`
 	PublicKey   string    `json:"public_key"`
 	PrivateKey  string    `json:"private_key"`
 	BenchmarkID string    `json:"benchmark_id"`
+	FileStored  bool      `json:"file_stored"`
+	FilePath    string    `json:"file_path,omitempty"`
 }
 
 type KeyStore struct {
@@ -65,7 +67,7 @@ func (ks *KeyStore) StoreRSAKey(key *rsa.PrivateKey, size int, benchmarkID strin
 
 	storedKey := &StoredKey{
 		ID:          uuid.New().String(),
-		Type:        KeyTypeRSA,
+		Type:        string(KeyTypeRSA),
 		Size:        size,
 		CreatedAt:   time.Now(),
 		PublicKey:   string(publicKeyPEM),
@@ -103,7 +105,7 @@ func (ks *KeyStore) StoreECDSAKey(key *ecdsa.PrivateKey, size int, benchmarkID s
 
 	storedKey := &StoredKey{
 		ID:          uuid.New().String(),
-		Type:        KeyTypeECDSA,
+		Type:        string(KeyTypeECDSA),
 		Size:        size,
 		CreatedAt:   time.Now(),
 		PublicKey:   string(publicKeyPEM),
@@ -141,7 +143,7 @@ func (ks *KeyStore) StoreEd25519Key(publicKey ed25519.PublicKey, privateKey ed25
 
 	storedKey := &StoredKey{
 		ID:          uuid.New().String(),
-		Type:        KeyTypeEd25519,
+		Type:        string(KeyTypeEd25519),
 		Size:        256,
 		CreatedAt:   time.Now(),
 		PublicKey:   string(publicKeyPEM),
@@ -183,6 +185,12 @@ func (ks *KeyStore) DeleteKey(id string) {
 	delete(ks.keys, id)
 }
 
+func (ks *KeyStore) StoreKeyReference(key *StoredKey) {
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+	ks.keys[key.ID] = key
+}
+
 func (ks *KeyStore) GetAllKeys() []*StoredKey {
 	ks.mu.RLock()
 	defer ks.mu.RUnlock()
@@ -192,4 +200,17 @@ func (ks *KeyStore) GetAllKeys() []*StoredKey {
 		keys = append(keys, key)
 	}
 	return keys
+}
+
+func (ks *KeyStore) CountFileStoredKeys() int {
+	ks.mu.RLock()
+	defer ks.mu.RUnlock()
+	
+	count := 0
+	for _, key := range ks.keys {
+		if key.FileStored {
+			count++
+		}
+	}
+	return count
 }

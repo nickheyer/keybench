@@ -25,6 +25,7 @@
                     <label>Algorithms:</label>
                     <div class="checkbox-group">
                         <label><input type="checkbox" name="algorithms" value="rsa" checked> RSA</label>
+                        <label><input type="checkbox" name="algorithms" value="rsa-parallel"> RSA (Multi-core) <small>Best for ≥8192 bits</small></label>
                         <label><input type="checkbox" name="algorithms" value="ecdsa"> ECDSA</label>
                         <label><input type="checkbox" name="algorithms" value="ed25519"> Ed25519</label>
                     </div>
@@ -32,8 +33,16 @@
 
                 <div class="form-group">
                     <label for="keySizes">Key Sizes (comma-separated):</label>
-                    <input type="text" id="keySizes" name="keySizes" value="2048,4096" placeholder="e.g., 2048,4096">
-                    <small>RSA: 1024-16384, ECDSA: 224/256/384/521, Ed25519: 256</small>
+                    <input type="text" id="keySizes" name="keySizes" value="2048,4096" placeholder="e.g., 2048,4096,32768,65536,131072">
+                    <small>RSA: Any size up to system limits (≥8192 bits stored to disk), ECDSA: 224/256/384/521, Ed25519: 256</small>
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="fileStorage" name="fileStorage"> 
+                        Force file storage for all keys
+                    </label>
+                    <small>Automatically enabled for RSA ≥ 8192 bits</small>
                 </div>
 
                 <div class="form-group">
@@ -42,8 +51,16 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="parallel">Parallel Workers:</label>
+                    <label for="parallel">Concurrent Keys:</label>
                     <input type="number" id="parallel" name="parallel" value="1" min="1" max="32">
+                    <small>Number of keys to generate simultaneously. Each key uses one CPU core.<br>
+                    Example: 8 concurrent keys = generate 8 keys at once using 8 cores</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="workers">Worker Threads:</label>
+                    <input type="number" id="workers" name="workers" value="1" min="1" max="32">
+                    <small>Number of background worker threads in the pool (default: 1)</small>
                 </div>
 
                 <div class="form-group">
@@ -61,6 +78,7 @@
                 <div class="progress-bar" id="progressBar"></div>
             </div>
             <div class="progress-info" id="progressInfo"></div>
+            <button class="btn btn-danger" id="terminateBtn" onclick="terminateBenchmark()">Terminate Benchmark</button>
         </div>
 
         <div class="results-section" id="resultsSection" style="display: none;">
@@ -75,6 +93,9 @@
                 <button class="btn btn-danger" onclick="clearAllKeys()">Clear All</button>
             </div>
             <div id="keysList" class="keys-list"></div>
+            <div class="file-cleanup-status" id="fileCleanupStatus">
+                <small>Files older than 30 minutes are automatically cleaned up</small>
+            </div>
         </div>
 
         <div class="history-section">
@@ -84,5 +105,6 @@
     </div>
 
     <script src="/static/js/app.js"></script>
+    <script src="/static/js/keysUI.js"></script>
 </body>
 </html>

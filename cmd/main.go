@@ -17,6 +17,7 @@ var (
 	keySizes     []int
 	iterations   int
 	parallel     int
+	workers      int
 	outputFormat string
 	outputFile   string
 	verbose      bool
@@ -43,6 +44,7 @@ func init() {
 	rootCmd.Flags().IntSliceVarP(&keySizes, "key-sizes", "k", []int{2048, 4096}, "Key sizes to test (varies by algorithm)")
 	rootCmd.Flags().IntVarP(&iterations, "iterations", "i", 10, "Number of iterations per test")
 	rootCmd.Flags().IntVarP(&parallel, "parallel", "p", 1, "Number of parallel workers")
+	rootCmd.Flags().IntVar(&workers, "workers", 1, "Number of worker threads in the pool (default: 1)")
 	rootCmd.Flags().StringVarP(&outputFormat, "format", "f", "table", "Output format (table, json, csv)")
 	rootCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output file (default: stdout)")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
@@ -56,12 +58,12 @@ func runBenchmark(cmd *cobra.Command, args []string) error {
 	// Check if we should run in web mode
 	if webMode || (len(os.Args) == 1) {
 		// Run web server
-		srv, err := server.NewServer(webPort)
+		srv, err := server.NewServerWithWorkers(webPort, workers)
 		if err != nil {
 			return fmt.Errorf("failed to create server: %w", err)
 		}
 		
-		log.Printf("Starting KeyBench web server on http://localhost:%s", webPort)
+		log.Printf("Starting KeyBench web server on http://localhost:%s with %d workers", webPort, workers)
 		log.Println("Press Ctrl+C to stop")
 		
 		return srv.Start()
@@ -96,6 +98,7 @@ func runBenchmark(cmd *cobra.Command, args []string) error {
 		KeySizes:     keySizes,
 		Iterations:   iterations,
 		Parallel:     parallel,
+		Workers:      workers,
 		ShowProgress: showProgress,
 		Timeout:      timeout,
 		Verbose:      verbose,

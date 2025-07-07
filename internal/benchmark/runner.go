@@ -157,6 +157,8 @@ func getAlgorithmBenchmark(name string) (AlgorithmBenchmark, error) {
 	switch name {
 	case "rsa":
 		return &RSABenchmark{}, nil
+	case "rsa-parallel":
+		return NewParallelRSABenchmark(), nil
 	case "ecdsa":
 		return &ECDSABenchmark{}, nil
 	case "ed25519":
@@ -167,7 +169,15 @@ func getAlgorithmBenchmark(name string) (AlgorithmBenchmark, error) {
 }
 
 func isValidKeySize(bench AlgorithmBenchmark, size int) bool {
-	for _, validSize := range bench.SupportedKeySizes() {
+	supportedSizes := bench.SupportedKeySizes()
+	
+	// If empty, allow any size
+	if len(supportedSizes) == 0 {
+		return true
+	}
+	
+	// Otherwise check against supported sizes
+	for _, validSize := range supportedSizes {
 		if size == validSize {
 			return true
 		}
