@@ -33,8 +33,8 @@ async function loadSystemInfo() {
                     <div class="value">${data.cpu_model}</div>
                 </div>
                 <div class="info-item">
-                    <label>CPU Cores</label>
-                    <div class="value">${data.cpu_cores} (${data.cpu_threads} threads)</div>
+                    <label>Available Workers</label>
+                    <div class="value">${data.cpu_threads} threads</div>
                 </div>
                 <div class="info-item">
                     <label>Memory</label>
