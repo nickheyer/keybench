@@ -21,7 +21,6 @@ type WorkerPool struct {
 	jobStore     *JobStore
 	keyStore     *storage.KeyStore
 	fileStorage  *storage.FileStorage
-	asyncRunner  *benchmark.AsyncWebRunner
 	activeJobs   map[string]context.CancelFunc
 	mu           sync.Mutex
 }
@@ -33,12 +32,8 @@ func NewWorkerPool(numWorkers int, jobStore *JobStore, keyStore *storage.KeyStor
 	
 	ctx, cancel := context.WithCancel(context.Background())
 	
-	// Create a default config for the async runner
-	config := benchmark.Config{
-		Parallel: runtime.NumCPU() * 2, // Use 2x CPU cores
-	}
-	
-	asyncRunner := benchmark.NewAsyncWebRunner(config, keyStore, fileStorage, "./keybench_storage/temp")
+	// Don't create a default async runner here - we'll create one per job with the job's config
+	// This was causing the parallel field to be overridden
 	
 	return &WorkerPool{
 		workers:     numWorkers,
@@ -48,16 +43,12 @@ func NewWorkerPool(numWorkers int, jobStore *JobStore, keyStore *storage.KeyStor
 		jobStore:    jobStore,
 		keyStore:    keyStore,
 		fileStorage: fileStorage,
-		asyncRunner: asyncRunner,
 		activeJobs:  make(map[string]context.CancelFunc),
 	}
 }
 
 func (wp *WorkerPool) Start() {
 	log.Printf("Starting worker pool with %d workers", wp.workers)
-	
-	// Start the async runner
-	wp.asyncRunner.Start()
 	
 	for i := 0; i < wp.workers; i++ {
 		wp.wg.Add(1)
@@ -70,9 +61,6 @@ func (wp *WorkerPool) Stop() {
 	wp.cancel()
 	close(wp.jobQueue)
 	wp.wg.Wait()
-	
-	// Stop the async runner
-	wp.asyncRunner.Stop()
 	
 	log.Println("Worker pool stopped")
 }
@@ -150,6 +138,10 @@ func (wp *WorkerPool) processJob(job *BenchmarkJob) {
 		default:
 		}
 	}
+	
+	// Log the job configuration for debugging
+	log.Printf("Processing job %s with config - Parallel: %d, Workers: %d, Iterations: %d",
+		job.ID, job.Config.Parallel, job.Config.Workers, job.Config.Iterations)
 	
 	// Create a new async runner with the job's config
 	runner := benchmark.NewAsyncWebRunner(job.Config, wp.keyStore, wp.fileStorage, "./keybench_storage/temp")

@@ -55,19 +55,9 @@ type KeyGenWorker struct {
 	workers        int
 	wg             sync.WaitGroup
 	tempDir        string
-	fileCleanup    *FileCleanupManager
 	activeRequests int32
 	totalGenerated int64
 	bytesGenerated int64
-}
-
-// FileCleanupManager handles periodic cleanup of generated files
-type FileCleanupManager struct {
-	mu       sync.Mutex
-	files    map[string]*FileInfo
-	maxAge   time.Duration
-	interval time.Duration
-	stop     chan struct{}
 }
 
 // FileInfo tracks file metadata
@@ -92,30 +82,17 @@ func NewKeyGenWorkerWithCount(tempDir string, workers int) *KeyGenWorker {
 	}
 
 	kgw := &KeyGenWorker{
-		ctx:         ctx,
-		cancel:      cancel,
-		requests:    make(chan KeyGenRequest, workers*2),
-		workers:     workers,
-		tempDir:     tempDir,
-		fileCleanup: NewFileCleanupManager(30*time.Minute, 5*time.Minute),
+		ctx:      ctx,
+		cancel:   cancel,
+		requests: make(chan KeyGenRequest, workers*2),
+		workers:  workers,
+		tempDir:  tempDir,
 	}
 
 	// Ensure temp directory exists
 	os.MkdirAll(tempDir, 0755)
 
 	return kgw
-}
-
-// NewFileCleanupManager creates a new file cleanup manager
-func NewFileCleanupManager(maxAge, interval time.Duration) *FileCleanupManager {
-	fcm := &FileCleanupManager{
-		files:    make(map[string]*FileInfo),
-		maxAge:   maxAge,
-		interval: interval,
-		stop:     make(chan struct{}),
-	}
-	go fcm.run()
-	return fcm
 }
 
 // Start begins the worker pool
@@ -148,7 +125,6 @@ func (kgw *KeyGenWorker) Stop() {
 
 	close(kgw.requests)
 	kgw.wg.Wait()
-	kgw.fileCleanup.Stop()
 }
 
 // Submit submits a key generation request
@@ -244,11 +220,6 @@ func (kgw *KeyGenWorker) processRequest(req KeyGenRequest) KeyGenResponse {
 		resp.Error = fmt.Errorf("unknown key type: %s", req.Type)
 	}
 
-	// Register file for cleanup if created
-	if resp.FilePath != "" && resp.Error == nil {
-		kgw.fileCleanup.MarkCompleted(resp.FilePath)
-	}
-
 	return resp
 }
 
@@ -288,12 +259,8 @@ func (kgw *KeyGenWorker) generateParallelRSAKey(bits int, forceFile bool, ctx co
 		filePath = filepath.Join(kgw.tempDir, filename)
 
 		// Register file as in-progress
-		requestID := fmt.Sprintf("req_%d", time.Now().UnixNano())
-		kgw.fileCleanup.RegisterInProgress(filePath, requestID)
-
 		err = kgw.writeChunked(filePath, pemBytes)
 		if err != nil {
-			kgw.fileCleanup.Remove(filePath)
 			return nil, 0, "", fmt.Errorf("failed to write key to file: %w", err)
 		}
 
@@ -341,13 +308,8 @@ func (kgw *KeyGenWorker) generateRSAKey(bits int, forceFile bool, ctx context.Co
 			filename := fmt.Sprintf("rsa_%d_%d.pem", bits, time.Now().UnixNano())
 			filePath = filepath.Join(kgw.tempDir, filename)
 
-			// Register file as in-progress
-			requestID := fmt.Sprintf("req_%d", time.Now().UnixNano())
-			kgw.fileCleanup.RegisterInProgress(filePath, requestID)
-
 			err = kgw.writeChunked(filePath, pemBytes)
 			if err != nil {
-				kgw.fileCleanup.Remove(filePath)
 				return nil, 0, "", fmt.Errorf("failed to write key to file: %w", err)
 			}
 
@@ -380,13 +342,8 @@ func (kgw *KeyGenWorker) generateRSAKey(bits int, forceFile bool, ctx context.Co
 		filename := fmt.Sprintf("rsa_%d_%d.pem", bits, time.Now().UnixNano())
 		filePath = filepath.Join(kgw.tempDir, filename)
 
-		// Register file as in-progress
-		requestID := fmt.Sprintf("req_%d", time.Now().UnixNano())
-		kgw.fileCleanup.RegisterInProgress(filePath, requestID)
-
 		err = kgw.writeChunked(filePath, pemBytes)
 		if err != nil {
-			kgw.fileCleanup.Remove(filePath)
 			return nil, 0, "", fmt.Errorf("failed to write key to file: %w", err)
 		}
 
@@ -405,22 +362,14 @@ func (kgw *KeyGenWorker) generateLargeRSAKey(bits int, ctx context.Context) (key
 
 	filename := fmt.Sprintf("rsa_%d_%d.pem", bits, time.Now().UnixNano())
 	filePath = filepath.Join(kgw.tempDir, filename)
-
-	// Register file as in-progress
-	requestID := fmt.Sprintf("req_%d", time.Now().UnixNano())
-	kgw.fileCleanup.RegisterInProgress(filePath, requestID)
-
-	// Create the file
 	file, err := os.Create(filePath)
 	if err != nil {
-		kgw.fileCleanup.Remove(filePath)
 		return nil, 0, "", fmt.Errorf("failed to create file: %w", err)
 	}
 	defer func() {
 		file.Close()
 		if err != nil {
-			os.Remove(filePath) // Clean up on error
-			kgw.fileCleanup.Remove(filePath)
+			os.Remove(filePath)
 		}
 	}()
 
@@ -752,99 +701,4 @@ func (kgw *KeyGenWorker) writeChunked(filePath string, data []byte) error {
 	}
 
 	return file.Sync()
-}
-
-// FileCleanupManager methods
-
-func (fcm *FileCleanupManager) run() {
-	ticker := time.NewTicker(fcm.interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			fcm.cleanup()
-		case <-fcm.stop:
-			return
-		}
-	}
-}
-
-func (fcm *FileCleanupManager) RegisterInProgress(filePath, requestID string) {
-	fcm.mu.Lock()
-	defer fcm.mu.Unlock()
-	fcm.files[filePath] = &FileInfo{
-		CreatedAt:  time.Now(),
-		InProgress: true,
-		RequestID:  requestID,
-	}
-}
-
-func (fcm *FileCleanupManager) MarkCompleted(filePath string) {
-	fcm.mu.Lock()
-	defer fcm.mu.Unlock()
-	if info, exists := fcm.files[filePath]; exists {
-		now := time.Now()
-		info.CompletedAt = &now
-		info.InProgress = false
-	}
-}
-
-func (fcm *FileCleanupManager) Remove(filePath string) {
-	fcm.mu.Lock()
-	defer fcm.mu.Unlock()
-	delete(fcm.files, filePath)
-}
-
-func (fcm *FileCleanupManager) cleanup() {
-	fcm.mu.Lock()
-	defer fcm.mu.Unlock()
-
-	now := time.Now()
-	for path, info := range fcm.files {
-		// Skip files that are still in progress
-		if info.InProgress {
-			continue
-		}
-
-		// Use completion time if available, otherwise creation time
-		referenceTime := info.CreatedAt
-		if info.CompletedAt != nil {
-			referenceTime = *info.CompletedAt
-		}
-
-		if now.Sub(referenceTime) > fcm.maxAge {
-			os.Remove(path)
-			delete(fcm.files, path)
-		}
-	}
-}
-
-// TerminateRequest cancels all files associated with a request and cleans them up
-func (fcm *FileCleanupManager) TerminateRequest(requestID string) {
-	fcm.mu.Lock()
-	defer fcm.mu.Unlock()
-
-	for path, info := range fcm.files {
-		if info.RequestID == requestID {
-			os.Remove(path)
-			delete(fcm.files, path)
-		}
-	}
-}
-
-func (fcm *FileCleanupManager) Stop() {
-	close(fcm.stop)
-}
-
-// GetActiveFiles returns the list of currently tracked files
-func (fcm *FileCleanupManager) GetActiveFiles() []string {
-	fcm.mu.Lock()
-	defer fcm.mu.Unlock()
-
-	files := make([]string, 0, len(fcm.files))
-	for path := range fcm.files {
-		files = append(files, path)
-	}
-	return files
 }

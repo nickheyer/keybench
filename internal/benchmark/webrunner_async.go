@@ -364,11 +364,3 @@ func (w *AsyncWebRunner) shouldUseFileStorage(algorithm string, keySize int) boo
 		return false
 	}
 }
-
-// GetCleanupManager returns the file cleanup manager
-func (w *AsyncWebRunner) GetCleanupManager() *FileCleanupManager {
-	if w.keyGenWorker != nil {
-		return w.keyGenWorker.fileCleanup
-	}
-	return nil
-}

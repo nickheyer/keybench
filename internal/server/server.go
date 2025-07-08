@@ -57,7 +57,7 @@ func NewServerWithWorkers(port string, workers int) (*Server, error) {
 	if workers < 1 {
 		workers = 1
 	}
-	
+
 	sysInfo, err := sysinfo.Collect()
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect system info: %w", err)
@@ -90,7 +90,7 @@ func NewServerWithWorkers(port string, workers int) (*Server, error) {
 
 	// Create worker pool with specified number of workers
 	s.workerPool = NewWorkerPool(workers, jobStore, keyStore, fileStorage)
-	
+
 	// Start file cleanup routine (cleanup files older than 24 hours)
 	fileStorage.StartCleanupRoutine(1*time.Hour, 24*time.Hour)
 
@@ -122,10 +122,10 @@ func (s *Server) setupRoutes() {
 func (s *Server) Start() error {
 	// Start worker pool
 	s.workerPool.Start()
-	
+
 	log.Printf("KeyBench Web Server starting on http://localhost:%s", s.port)
 	log.Printf("Worker pool started with %d workers", runtime.NumCPU())
-	
+
 	return http.ListenAndServe(":"+s.port, s.router)
 }
 
@@ -145,7 +145,11 @@ func (s *Server) handleCreateBenchmark(w http.ResponseWriter, r *http.Request) {
 	if config.Parallel == 0 {
 		config.Parallel = runtime.NumCPU()
 	}
-	
+
+	// Log the configuration for debugging
+	log.Printf("Creating benchmark job with config - Parallel: %d, Workers: %d, Iterations: %d", 
+		config.Parallel, config.Workers, config.Iterations)
+
 	// Create job
 	job := &BenchmarkJob{
 		ID:        uuid.New().String(),
@@ -215,7 +219,7 @@ func (s *Server) handleTerminateBenchmark(w http.ResponseWriter, r *http.Request
 		http.Error(w, "Benchmark not found", http.StatusNotFound)
 		return
 	}
-	
+
 	// Update status to terminated
 	job.Status = "terminated"
 	job.UpdatedAt = time.Now()
@@ -226,7 +230,7 @@ func (s *Server) handleTerminateBenchmark(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
-		"status": "terminated",
+		"status":  "terminated",
 		"message": "Benchmark termination initiated",
 	})
 }
@@ -346,7 +350,7 @@ func (s *Server) handleDownloadKey(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("Failed to read key file: %v", err), http.StatusInternalServerError)
 			return
 		}
-		
+
 		// For file-stored keys, we have both private and public in the same file
 		// If public key is requested, we need to extract it
 		if keyType == "public" {
@@ -356,7 +360,7 @@ func (s *Server) handleDownloadKey(w http.ResponseWriter, r *http.Request) {
 				content = publicContent
 			}
 		}
-		
+
 		if keyType == "public" {
 			filename = fmt.Sprintf("%s_%s_%d_public.pem", key.Type, key.ID[:8], key.Size)
 		} else {
@@ -383,7 +387,7 @@ func extractPublicKeyFromPEM(pemData []byte) []byte {
 	// Look for PUBLIC KEY block
 	startMarker := []byte("-----BEGIN PUBLIC KEY-----")
 	endMarker := []byte("-----END PUBLIC KEY-----")
-	
+
 	startIdx := bytes.Index(pemData, startMarker)
 	if startIdx == -1 {
 		// Try RSA PUBLIC KEY format
@@ -394,15 +398,15 @@ func extractPublicKeyFromPEM(pemData []byte) []byte {
 			return nil
 		}
 	}
-	
+
 	endIdx := bytes.Index(pemData[startIdx:], endMarker)
 	if endIdx == -1 {
 		return nil
 	}
-	
+
 	// Include the end marker
 	endIdx += startIdx + len(endMarker)
-	
+
 	return pemData[startIdx:endIdx]
 }
 
@@ -419,13 +423,6 @@ func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 			// Log the error but don't fail the request
 			log.Printf("Failed to delete key file %s: %v", key.FilePath, err)
 		}
-		
-		// Also remove from cleanup manager if the worker pool is available
-		if s.workerPool != nil && s.workerPool.asyncRunner != nil {
-			if cleanupMgr := s.workerPool.asyncRunner.GetCleanupManager(); cleanupMgr != nil {
-				cleanupMgr.Remove(key.FilePath)
-			}
-		}
 	}
 
 	// Delete from key store
@@ -436,20 +433,20 @@ func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCleanupAllKeys(w http.ResponseWriter, r *http.Request) {
 	filesDeleted := 0
 	errors := 0
-	
+
 	// Clean up files in both temp and keys directories
 	directories := []string{
 		"./keybench_storage/temp",
 		"./keybench_storage/keys",
 	}
-	
+
 	for _, dir := range directories {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			log.Printf("Failed to read directory %s: %v", dir, err)
 			continue
 		}
-		
+
 		for _, entry := range entries {
 			if !entry.IsDir() {
 				filePath := filepath.Join(dir, entry.Name())
@@ -463,20 +460,20 @@ func (s *Server) handleCleanupAllKeys(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	
+
 	// Also clear all keys from the key store
 	keys := s.keyStore.GetAllKeys()
 	for _, key := range keys {
 		s.keyStore.DeleteKey(key.ID)
 	}
-	
+
 	response := map[string]interface{}{
 		"files_deleted": filesDeleted,
 		"keys_cleared":  len(keys),
 		"errors":        errors,
 		"message":       fmt.Sprintf("Cleaned up %d files and %d keys", filesDeleted, len(keys)),
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -485,20 +482,20 @@ func (s *Server) handleCleanupStatus(w http.ResponseWriter, r *http.Request) {
 	// Get cleanup status from file storage
 	activeFiles := 0
 	pendingCleanup := 0
-	
+
 	if s.fileStorage != nil {
 		// This would need to be implemented in FileStorage
 		// For now, return a simple status
 		activeFiles = s.keyStore.CountFileStoredKeys()
 	}
-	
+
 	status := map[string]interface{}{
-		"active_files": activeFiles,
-		"pending_cleanup": pendingCleanup,
+		"active_files":     activeFiles,
+		"pending_cleanup":  pendingCleanup,
 		"cleanup_interval": "30 minutes",
-		"enabled": true,
+		"enabled":          true,
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
 }
