@@ -17,7 +17,7 @@ RUN go mod download
 COPY . .
 
 # Build the binary
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o keybench ./cmd/main.go
+RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o keybench ./cmd/keybench/main.go
 
 # Runtime stage
 FROM alpine:latest
