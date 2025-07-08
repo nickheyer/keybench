@@ -39,8 +39,12 @@ func (p *ParallelRSAGenerator) GenerateKey(bits int, ctx context.Context) (*rsa.
 	primeChan := make(chan *big.Int, 2)
 	errChan := make(chan error, 1)
 
+	// Create a cancellable context for the prime generation
+	genCtx, genCancel := context.WithCancel(ctx)
+	defer genCancel() // This will cancel all workers when we return
+
 	// Start parallel prime generation that yields 2 primes
-	go p.generateTwoPrimesParallel(primeSize, ctx, primeChan, errChan)
+	go p.generateTwoPrimesParallel(primeSize, genCtx, primeChan, errChan)
 
 	// Collect the two primes
 	var primes []*big.Int
@@ -121,7 +125,6 @@ func (p *ParallelRSAGenerator) GenerateKey(bits int, ctx context.Context) (*rsa.
 // generateTwoPrimesParallel generates two primes in parallel and sends them to the channel
 func (p *ParallelRSAGenerator) generateTwoPrimesParallel(bits int, ctx context.Context, primeChan chan<- *big.Int, errChan chan<- error) {
 	var found atomic.Int32 // Count of primes found
-	var stopWorkers atomic.Bool
 
 	// Use all workers to find 2 primes
 	for i := 0; i < p.workers; i++ {
@@ -132,45 +135,34 @@ func (p *ParallelRSAGenerator) generateTwoPrimesParallel(bits int, ctx context.C
 				reader: rand.Reader,
 			}
 
-			for !stopWorkers.Load() {
-				// Check context cancellation
-				select {
-				case <-ctx.Done():
-					if found.Load() == 0 {
-						select {
-						case errChan <- ctx.Err():
-						default:
-						}
-					}
-					return
-				default:
-				}
-
+			for {
 				// Generate a candidate prime
 				candidate, err := rand.Prime(reader, bits)
 				if err != nil {
-					if found.Load() == 0 {
+					// Check if this is a cancellation
+					select {
+					case <-ctx.Done():
+						// Context was cancelled
+						return
+					default:
+						// Try to report err
 						select {
 						case errChan <- err:
-						default:
+						case <-ctx.Done():
 						}
-					}
-					return
-				}
-
-				// Check if we need more primes
-				if found.Add(1) <= 2 {
-					select {
-					case primeChan <- candidate:
-						// If we've found 2 primes, signal workers to stop
-						if found.Load() == 2 {
-							stopWorkers.Store(true)
-						}
-					case <-ctx.Done():
 						return
 					}
-				} else {
-					// We have enough primes
+				}
+
+				select {
+				case primeChan <- candidate:
+					// Successfully sent prime
+					if found.Add(1) == 2 {
+						// We've found both primes
+						return
+					}
+				case <-ctx.Done():
+					// Context cancelled while trying to send
 					return
 				}
 			}

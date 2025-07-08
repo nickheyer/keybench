@@ -14,11 +14,11 @@ all: build
 
 build:
 	@echo "Building $(BINARY_NAME)..."
-	@go build -o $(GOBIN)/$(BINARY_NAME) ./cmd/main.go
+	@go build -o $(GOBIN)/$(BINARY_NAME) ./cmd/keybench/main.go
 
 run:
 	@echo "Running $(BINARY_NAME)..."
-	@go run ./cmd/main.go
+	@go run ./cmd/keybench/main.go
 
 # Run tests
 test:
@@ -62,7 +62,7 @@ install: build
 # Run benchmarks
 benchmark-example:
 	@echo "Running example benchmark..."
-	@go run cmd/main.go -a rsa,ecdsa,ed25519 -k 2048,256 -i 5 -p 2 -v
+	@go run cmd/keybench/main.go -a rsa,ecdsa,ed25519 -k 2048,256 -i 5 -p 2 -v
 
 # Run linting
 lint:

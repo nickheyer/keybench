@@ -86,7 +86,6 @@ func NewKeyGenWorker(tempDir string) *KeyGenWorker {
 // NewKeyGenWorkerWithCount creates a new key generation worker pool with specified workers
 func NewKeyGenWorkerWithCount(tempDir string, workers int) *KeyGenWorker {
 	ctx, cancel := context.WithCancel(context.Background())
-	
 	// Validate workers count
 	if workers < 1 {
 		workers = 1
@@ -257,7 +256,7 @@ func (kgw *KeyGenWorker) processRequest(req KeyGenRequest) KeyGenResponse {
 func (kgw *KeyGenWorker) generateParallelRSAKey(bits int, forceFile bool, ctx context.Context) (key interface{}, size int64, filePath string, err error) {
 	// Use the parallel generator with the same number of workers as the pool
 	generator := NewParallelRSAGeneratorWithWorkers(kgw.workers)
-	
+
 	// Check context before generation
 	if ctx != nil {
 		select {
@@ -266,28 +265,28 @@ func (kgw *KeyGenWorker) generateParallelRSAKey(bits int, forceFile bool, ctx co
 		default:
 		}
 	}
-	
+
 	// Generate the key using parallel processing
 	privateKey, err := generator.GenerateKey(bits, ctx)
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("failed to generate parallel RSA key: %w", err)
 	}
-	
+
 	// Encode to PEM to get size
 	pemBlock := &pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
 	}
-	
+
 	pemBytes := pem.EncodeToMemory(pemBlock)
 	size = int64(len(pemBytes))
-	
+
 	// Decide storage method
 	if forceFile || size > FileThreshold || bits >= 8192 {
 		// Write to file
 		filename := fmt.Sprintf("rsa_parallel_%d_%d.pem", bits, time.Now().UnixNano())
 		filePath = filepath.Join(kgw.tempDir, filename)
-		
+
 		// Register file as in-progress
 		requestID := fmt.Sprintf("req_%d", time.Now().UnixNano())
 		kgw.fileCleanup.RegisterInProgress(filePath, requestID)
@@ -301,7 +300,7 @@ func (kgw *KeyGenWorker) generateParallelRSAKey(bits int, forceFile bool, ctx co
 		// Don't keep large keys in memory
 		return nil, size, filePath, nil
 	}
-	
+
 	// Return in-memory key
 	return privateKey, size, "", nil
 }
